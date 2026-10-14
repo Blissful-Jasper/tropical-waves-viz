@@ -1,0 +1,10 @@
+numpy>=1.24
+pandas>=2.0
+xarray>=2024.1
+netCDF4>=1.6
+scipy>=1.10
+matplotlib>=3.8
+cartopy>=0.23
+pillow>=10.0
+streamlit>=1.45
+earthaccess>=0.12

@@ -1,0 +1,13 @@
+# 深色主题：底色取自热带夜空，滑块/按钮用与图中“当前日期”标线相同的黄色
+[theme]
+base = "dark"
+primaryColor = "#ffd60a"
+backgroundColor = "#0f1c26"
+secondaryBackgroundColor = "#162a38"
+textColor = "#e6edf2"
+
+[server]
+maxUploadSize = 50
+
+[browser]
+gatherUsageStats = false

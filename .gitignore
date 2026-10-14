@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+# 数据缓存与输出（体积大，不进仓库）
+data/
+outputs/
+*.gif
+*.mp4
+!docs/*.gif
+.DS_Store
+.netrc
