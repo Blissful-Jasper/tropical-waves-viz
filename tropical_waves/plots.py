@@ -130,13 +130,13 @@ def draw_map_frame(ax, cfg, olr, filt, t, bg_path=None):
     for w in cfg.enabled_waves():
         da = filt[w]
         fv = at_time(da, t).values.copy()
-        fv[np.abs(da.lat.values) > cfg.contour_lat, :] = np.nan
+        fv[np.abs(da.lat.values) > cfg.lat_limit(w), :] = np.nan
         fv, lonc = add_cyclic_point(fv, coord=da.lon.values)
-        p = cfg.waves[w]
-        arts.append(ax.contour(lonc, da.lat.values, fv, levels=[-p["thresh"]], colors=[p["color"]],
+        p, thr = cfg.waves[w], cfg.thresh(w, da)
+        arts.append(ax.contour(lonc, da.lat.values, fv, levels=[-thr], colors=[p["color"]],
                                linewidths=cfg.linewidth, linestyles="solid", transform=PC, zorder=6))
         if cfg.show_suppressed:
-            arts.append(ax.contour(lonc, da.lat.values, fv, levels=[p["thresh"]], colors=[p["color"]],
+            arts.append(ax.contour(lonc, da.lat.values, fv, levels=[thr], colors=[p["color"]],
                                    linewidths=cfg.linewidth * 0.6, linestyles="--", transform=PC, zorder=6))
     return arts
 
@@ -162,7 +162,7 @@ def draw_hovmoller(ax, cfg, olr, filt):
             ax.contourf(hx, hy, -hb, levels=np.linspace(-60, 60, 25), cmap=dim, extend="both")
             for w in cfg.enabled_waves():
                 p = cfg.waves[w]
-                thr, col = sc * p["thresh"], p["color"]
+                thr, col = sc * cfg.thresh(w, filt[w]), p["color"]
                 ax.contourf(hx, hy, hvs[w], levels=[-1e9, -2 * thr, -thr],
                             colors=[to_rgba(col, 0.9), to_rgba(col, 0.5)])
                 ax.contour(hx, hy, hvs[w], levels=[-thr], colors=[col], linewidths=0.6, linestyles="solid")
@@ -171,22 +171,22 @@ def draw_hovmoller(ax, cfg, olr, filt):
                                linestyles="--", alpha=0.6)
         elif cfg.hov_style == "shaded" and hvs:
             tot = sum(hvs.values())
-            vmax = 2.5 * sc * max(cfg.waves[w]["thresh"] for w in hvs)
+            vmax = 2.5 * sc * max(cfg.thresh(w, filt[w]) for w in hvs)
             cf = ax.contourf(hx, hy, tot, levels=np.linspace(-vmax, vmax, 21), cmap=cfg.hov_cmap, extend="both")
             cb = ax.figure.colorbar(cf, ax=ax, fraction=0.025, pad=0.01)
             cb.set_label("filtered OLR (W m$^{-2}$)", fontsize=8)
             cb.ax.tick_params(labelsize=7)
             for w in hvs:
-                ax.contour(hx, hy, hvs[w], levels=[-sc * cfg.waves[w]["thresh"]],
+                ax.contour(hx, hy, hvs[w], levels=[-sc * cfg.thresh(w, filt[w])],
                            colors=[cfg.waves[w]["color"]], linewidths=1.0, linestyles="solid")
         else:
             ax.contourf(hx, hy, -hb, levels=np.linspace(-60, 60, 25), cmap="gray", extend="both")
             for w in hvs:
                 p = cfg.waves[w]
-                ax.contour(hx, hy, hvs[w], levels=[-sc * p["thresh"]], colors=[p["color"]],
+                ax.contour(hx, hy, hvs[w], levels=[-sc * cfg.thresh(w, filt[w])], colors=[p["color"]],
                            linewidths=1.2, linestyles="solid")
                 if cfg.show_suppressed:
-                    ax.contour(hx, hy, hvs[w], levels=[sc * p["thresh"]], colors=[p["color"]],
+                    ax.contour(hx, hy, hvs[w], levels=[sc * cfg.thresh(w, filt[w])], colors=[p["color"]],
                                linewidths=0.8, linestyles="--")
         ax.set_ylim(hy[-1], hy[0])               # 时间向下增加
     ax.set_xlim(0, 360)

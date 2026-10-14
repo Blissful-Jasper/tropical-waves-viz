@@ -10,3 +10,6 @@ outputs/
 !docs/*.gif
 .DS_Store
 .netrc
+olr_cache/
+release_data/
+*.nc

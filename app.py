@@ -31,8 +31,10 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-SOURCE_NAMES = {"cdr": "NOAA OLR CDR（2024 至今，自动下载）", "psl": "NOAA PSL 插值 OLR（到 2022 年底）",
-                "local": "本地 netCDF 文件", "demo": "合成演示数据（离线，非真实观测）"}
+SOURCE_NAMES = {"auto": "自动（本地缓存优先；1974 年至今，推荐）",
+                "psl": "只用 NOAA PSL 插值 OLR（1974-06 ~ 2022-12）",
+                "local": "指定本地 netCDF 文件", "demo": "合成演示数据（离线，非真实观测）"}
+DATA_FIRST, DATA_LAST = pd.Timestamp("1974-06-01"), pd.Timestamp.now().normalize()
 BG_NAMES = {"olr": "OLR（无需账号）", "mergir": "红外亮温 GPM_MERGIR（4 km，需 Earthdata）",
             "imerg": "IMERG Final 逐日降水（需 Earthdata）", "imerg-late": "IMERG Late 逐日降水（近期日期）",
             "none": "无背景"}
@@ -97,23 +99,35 @@ sb = st.sidebar
 sb.markdown("### 参数")
 
 with sb.expander("数据与时间", expanded=True):
-    source = st.selectbox("OLR 数据源", list(SOURCE_NAMES), index=list(SOURCE_NAMES).index(base.source),
+    source = st.selectbox("OLR 数据源", list(SOURCE_NAMES),
+                          index=list(SOURCE_NAMES).index(base.source) if base.source in SOURCE_NAMES else 0,
                           format_func=SOURCE_NAMES.get, key=k("source"))
     c1, c2 = st.columns(2)
-    start = c1.date_input("开始", pd.Timestamp(base.start), key=k("start"))
-    end = c2.date_input("结束", pd.Timestamp(base.end), key=k("end"))
+    # Streamlit 默认只允许选 value ±10 年，必须显式给出范围，否则选不到 2015 年以前
+    start = c1.date_input("开始", pd.Timestamp(base.start), min_value=DATA_FIRST, max_value=DATA_LAST,
+                          key=k("start"))
+    end = c2.date_input("结束", pd.Timestamp(base.end), min_value=DATA_FIRST, max_value=DATA_LAST,
+                        key=k("end"))
     pad = st.slider("滤波缓冲（天，前后各加）", 120, 365, base.pad, 10, key=k("pad"),
                     help="滤波需要比显示时段更长的序列。缓冲越长，波数-频率谱越平滑。")
     olr_files, olr_cache = base.olr_files, base.olr_cache
     if source == "local":
         olr_files = st.text_area("文件路径（每行一个，可用通配符）", "\n".join(base.olr_files) or "data/olr_cache/*.nc",
                                  key=k("files")).split()
-    if source == "cdr":
+    if source in ("auto", "psl"):
         olr_cache = st.text_input("OLR 缓存目录", base.olr_cache, key=k("olr_cache"),
-                                  help="自动下载失败时，把从 olr.umd.edu 手动下载的文件放进这个目录。")
+                                  help="目录里的任何 .nc（如 PSL 的 olr.day.mean.nc、CDR 年度文件）都会按时间范围"
+                                       "自动识别；缺的年份再在线下载到这里。也可用环境变量 TWV_OLR_DIRS 追加目录。")
+        if pd.Timestamp(start) < pd.Timestamp("2024-01-01") and source == "auto":
+            st.caption("2024 年以前：依次使用本地文件 → GitHub Release 年度小文件 → NCEI → PSL OPeNDAP。"
+                       "2023 年 PSL 没有数据，需要 OLR CDR。")
 
 waves = {}
 with sb.expander("波动与滤波", expanded=True):
+    thresh_mode = st.radio("阈值单位", ["abs", "std"], ["abs", "std"].index(base.thresh_mode), horizontal=True,
+                           format_func={"abs": "W m⁻²", "std": "标准差倍数 σ"}.get, key=k("tmode"),
+                           help="各波动滤波后的方差差别很大（Kelvin 频段最宽、方差最大）。"
+                                "按 σ 设阈值时，每种波动都在自身强度的同一分位画线，更便于比较。")
     tabs = st.tabs([WAVE_NAMES[w] for w in ("kelvin", "mjo", "er")])
     for tab, w in zip(tabs, ("kelvin", "mjo", "er")):
         p = base.waves[w]
@@ -121,8 +135,20 @@ with sb.expander("波动与滤波", expanded=True):
             c1, c2 = st.columns([3, 2])
             en = c1.checkbox("显示", p["enabled"], key=k(f"{w}_en"))
             col = c2.color_picker("颜色", p["color"], key=k(f"{w}_col"), label_visibility="collapsed")
-            thr = st.slider("等值线阈值 (W m⁻²)", 2.0, 30.0, float(p["thresh"]), 0.5, key=k(f"{w}_thr"),
-                            help="滤波 OLR 低于 −阈值 画实线（对流增强），高于 +阈值 画虚线。")
+            thr, thr_std = float(p["thresh"]), float(p.get("thresh_std", 1.0))
+            if thresh_mode == "abs":
+                thr = st.slider("等值线阈值 (W m⁻²)", 2.0, 30.0, thr, 0.5, key=k(f"{w}_thr"),
+                                help="滤波 OLR 低于 −阈值 画实线（对流增强），高于 +阈值 画虚线。")
+            else:
+                thr_std = st.slider("等值线阈值 (σ)", 0.5, 3.0, thr_std, 0.1, key=k(f"{w}_thrs"),
+                                    help="σ = 显示时段内 10°S–10°N 滤波 OLR 的标准差。")
+            c1, c2 = st.columns(2)
+            lat_max = c1.number_input("等值线纬度 ±", 5.0, 30.0, float(p.get("lat_max") or 25.0), 1.0,
+                                      key=k(f"{w}_latmax"),
+                                      help="Kelvin 波是赤道陷获波，建议 ±15°；更高纬度的信号多为中纬度扰动漏入。")
+            sym = c2.checkbox("对称分量滤波", bool(p.get("symmetric")), key=k(f"{w}_sym"),
+                              help="先取 (OLR(φ)+OLR(−φ))/2 再滤波（Wheeler–Kiladis 做法），进一步压制"
+                                   "中纬度信号；画出的图会关于赤道对称。")
             c1, c2 = st.columns(2)
             tmin = c1.number_input("最短周期 (天)", 1.0, 200.0, float(p["tmin"]), 0.5, key=k(f"{w}_tmin"))
             tmax = c2.number_input("最长周期 (天)", 1.0, 400.0, float(p["tmax"]), 1.0, key=k(f"{w}_tmax"))
@@ -133,10 +159,11 @@ with sb.expander("波动与滤波", expanded=True):
             if WAVE_DEFAULTS[w]["hmin"] is not None:
                 hmin = c1.number_input("最小等效深度 (m)", 1.0, 500.0, float(p["hmin"] or 8), 1.0, key=k(f"{w}_hmin"))
                 hmax = c2.number_input("最大等效深度 (m)", 1.0, 500.0, float(p["hmax"] or 90), 1.0, key=k(f"{w}_hmax"))
-            waves[w] = dict(enabled=en, color=col, thresh=thr, tmin=tmin, tmax=tmax,
+            waves[w] = dict(enabled=en, color=col, thresh=thr, thresh_std=thr_std, lat_max=lat_max,
+                            symmetric=sym, tmin=tmin, tmax=tmax,
                             kmin=int(kmin), kmax=int(kmax), hmin=hmin, hmax=hmax)
     show_suppressed = st.toggle("显示对流抑制位相（虚线）", base.show_suppressed, key=k("supp"))
-    contour_lat = st.slider("等值线纬度范围 ±", 10.0, 30.0, base.contour_lat, 1.0, key=k("clat"))
+    contour_lat = st.slider("等值线纬度总上限 ±", 10.0, 30.0, base.contour_lat, 1.0, key=k("clat"))
     linewidth = st.slider("等值线粗细", 0.5, 4.0, base.linewidth, 0.25, key=k("lw"))
 
 with sb.expander("地图"):
@@ -202,6 +229,7 @@ def _num(txt):
 
 cfg = Config.from_dict(dict(
     start=str(start), end=str(end), pad=pad, source=source, olr_files=olr_files, olr_cache=olr_cache,
+    data_release=base.data_release, thresh_mode=thresh_mode,
     waves=waves, contour_lat=contour_lat, show_suppressed=show_suppressed, linewidth=linewidth,
     proj=proj, center_lon=center_lon, map_lat=map_lat, coast_color=coast_color, show_grid=show_grid,
     bg=bg, bg_hour=bg_hour, bg_res=bg_res, bg_cache=base.bg_cache, bg_cmap=bg_cmap,
@@ -242,6 +270,10 @@ except Exception as e:                                   # noqa: BLE001
     st.stop()
 for w in warns:
     st.warning(w)
+sig = [f"{WAVE_NAMES[w]} σ = {filt[w].attrs.get('std_eq', float('nan')):.1f}" for w in cfg.enabled_waves()]
+if sig:
+    st.caption("10°S–10°N 滤波 OLR 标准差（W m⁻²）：" + "，".join(sig) +
+               "。σ 越大，同一个绝对阈值下等值线范围越大。")
 if cfg.source == "demo":
     st.info("当前是合成演示数据，只用于熟悉界面，不能当作真实观测展示。")
 

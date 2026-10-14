@@ -38,7 +38,7 @@ def main(argv=None):
     ap.add_argument("--config", help="网页“配置与说明”里下载的 JSON")
     ap.add_argument("--start")
     ap.add_argument("--end")
-    ap.add_argument("--source", choices=["cdr", "psl", "local", "demo"])
+    ap.add_argument("--source", choices=["auto", "cdr", "psl", "local", "demo"])
     ap.add_argument("--olr-file", nargs="+", help="本地 OLR 文件（自动切换到 local 数据源）")
     ap.add_argument("--bg", choices=["olr", "mergir", "imerg", "imerg-late", "none"])
     ap.add_argument("--proj", choices=["strip", "globe"])
